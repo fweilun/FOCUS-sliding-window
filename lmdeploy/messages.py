@@ -396,6 +396,17 @@ class PytorchEngineConfig:
         dllm_fast_host (bool): batch the per-sequence host bookkeeping of the delayed cache / FOCUS / window.
         dllm_eos_early_stop (bool): finish a sequence once a stop word and everything before it are decoded,
             instead of waiting for the rest of its block (which is discarded).
+        dllm_prefill_min_waiting (int): When > 0, coalesce prefills: only prefill once this many requests are
+            waiting, the oldest one has waited dllm_prefill_max_wait_s, or fewer than half of max_batch_size
+            sequences are active (ready or running). 0 keeps the default rule, which prefills almost every
+            arrival because it is also evaluated while the current batch is running.
+        dllm_prefill_max_wait_s (float): Upper bound on how long a waiting request is held back by
+            dllm_prefill_min_waiting.
+        dllm_decode_micro_batch (int): When > 0, a decode forward takes at most this many sequences (the ones
+            that waited longest first), so the active sequences split into micro-batches whose host bookkeeping
+            overlaps the other micro-batch's forward. The forward then no longer synchronises on its per-step
+            stats; they are read after the output event instead. 0 keeps one batch per step. Do not combine with
+            dllm_masked_logits: its row selection (nonzero) blocks the host until the forward is done.
     """
     dtype: str = 'auto'
     tp: int = 1
@@ -464,6 +475,9 @@ class PytorchEngineConfig:
     dllm_masked_logits: bool = False
     dllm_fast_host: bool = False
     dllm_eos_early_stop: bool = False
+    dllm_prefill_min_waiting: int = 0
+    dllm_prefill_max_wait_s: float = 0.5
+    dllm_decode_micro_batch: int = 0
 
     role: EngineRole = EngineRole.Hybrid
     migration_backend: MigrationBackend = MigrationBackend.DLSlime
@@ -494,6 +508,9 @@ class PytorchEngineConfig:
             assert self.dllm_enable_focus, '--dllm-refresh-evict requires --dllm-enable-focus.'
         if self.dllm_window_conf > 0 or self.dllm_window_topn > 0:
             assert self.dllm_window_k > 0, '--dllm-window-conf/topn require --dllm-window-k.'
+        assert self.dllm_prefill_min_waiting >= 0, 'dllm_prefill_min_waiting must be >= 0.'
+        assert self.dllm_prefill_max_wait_s >= 0, 'dllm_prefill_max_wait_s must be >= 0.'
+        assert self.dllm_decode_micro_batch >= 0, 'dllm_decode_micro_batch must be >= 0.'
         if self.quant_policy > 0 and self.device_type not in ['cuda', 'ascend']:
             assert False, \
                    'kv cache quantization only works for CUDA and ASCEND.'

@@ -54,6 +54,13 @@ def add_engine_args(ap):
                     help='stop once a stop word and its prefix are decoded, not when the whole block is')
     ap.add_argument('--focus-evict-gate', type=float, default=0.0,
                     help='evict only in steps where FOCUS would evict at least this many masks per sequence')
+    ap.add_argument('--prefill-min-waiting', type=int, default=0,
+                    help='> 0: coalesce prefills until this many requests wait (see dllm_prefill_min_waiting)')
+    ap.add_argument('--prefill-max-wait-s', type=float, default=0.5,
+                    help='with --prefill-min-waiting: longest a waiting request is held back')
+    ap.add_argument('--decode-micro-batch', type=int, default=0,
+                    help='> 0: at most this many sequences per decode forward, overlapping host work of one '
+                    'micro-batch with the forward of the other (see dllm_decode_micro_batch)')
     ap.add_argument('--eager', action='store_true')
     ap.add_argument('--legacy-sampling', action='store_true',
                     help='top-k 50 / temperature 0.8 sampling, as in the runs before greedy decoding was fixed')
@@ -93,7 +100,11 @@ def build_engine(args):
         dllm_masked_logits=args.masked_logits,
         dllm_fast_host=args.fast_host,
         dllm_eos_early_stop=args.eos_early_stop,
-        max_prefill_token_num=args.concurrency * BLOCK,
+        dllm_prefill_min_waiting=args.prefill_min_waiting,
+        dllm_prefill_max_wait_s=args.prefill_max_wait_s,
+        dllm_decode_micro_batch=args.decode_micro_batch,
+        # 4096 at the default concurrency 128; small batches keep it so prompts are not split into 32-token chunks
+        max_prefill_token_num=max(args.concurrency * BLOCK, 4096),
     )
     return Engine.from_pretrained(args.model, engine_config=engine_config)
 

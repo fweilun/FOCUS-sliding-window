@@ -547,6 +547,13 @@ class DLLMSequenceStrategy(SequenceStrategy):
         dllm_mask = batched_outputs.extra_outputs.dllm_mask
         dllm_conf = getattr(batched_outputs.extra_outputs, 'dllm_conf', None)
         stop_pos = batched_outputs.stop_pos
+        # set instead of the model_meta entries when the forward deferred them (dllm_decode_micro_batch)
+        track_counts = getattr(batched_outputs, 'dllm_track_counts', None)
+        if track_counts is not None:
+            track_counts = track_counts.tolist()
+        focus_progress = getattr(batched_outputs, 'dllm_focus_progress', None)
+        if focus_progress is not None:
+            focus_progress = focus_progress.tolist()
 
         batch_size = len(running)
         next_token_ids = next_token_ids.view(batch_size, -1).numpy()
@@ -573,14 +580,23 @@ class DLLMSequenceStrategy(SequenceStrategy):
 
             if is_decoding:
                 if self.track:
-                    processed_tokens = model_meta.get(consts.DLLM_META_PROCESSED_TOKENS)
-                    input_tokens = model_meta.get(consts.DLLM_META_INPUT_TOKENS)
+                    if track_counts is not None:
+                        processed_tokens, input_tokens = track_counts[0][idx], track_counts[1][idx]
+                        if msg._last_processing_indices is not None:
+                            # tokens fed to layer 0 are known on the host: this step's processing slice. The deferred
+                            # pre-eviction count read back garbage when FOCUS evicted under CUDA graph + micro-batch.
+                            input_tokens = int(msg._last_processing_indices.numel())
+                    else:
+                        processed_tokens = model_meta.get(consts.DLLM_META_PROCESSED_TOKENS)
+                        input_tokens = model_meta.get(consts.DLLM_META_INPUT_TOKENS)
                     msg.record_decode_stats(processed_tokens, input_tokens)
                 if self.enable_delayed_cache:
                     # Refresh delayed-cache bookkeeping using the existing mask
                     # so newly unmasked tokens still get one more iteration.
                     msg._update_delayed_cache_state()
-                if msg._focus_enabled and model_meta is not None:
+                if msg._focus_enabled and focus_progress is not None:
+                    msg.mark_focus_processed(focus_progress[idx])
+                elif msg._focus_enabled and model_meta is not None:
                     processed_rightmost = model_meta.get('focus_processed_rightmost')
                     msg.mark_focus_processed(processed_rightmost)
             if is_decoding and msg._refresh_evict_repeat and msg._last_processing_indices is not None:
