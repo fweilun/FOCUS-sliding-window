@@ -568,6 +568,10 @@ class InputsMakerAsync:
         prefill = self.do_prefill()
         if prefill:
             enable = True
+        elif getattr(self.engine_strategy, 'gpu_multistep', 0) > 0:
+            # dllm_gpu_multistep: a decode prefetch would only batch the sequences outside the running round, which
+            # splits the population into several small decode groups for good; schedule them all after the round
+            return None, None
         else:
             num_ready = scheduler.num_ready()
             is_decoding = self.forward_inputs['inputs'].is_decoding
