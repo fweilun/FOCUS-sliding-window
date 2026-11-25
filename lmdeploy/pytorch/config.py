@@ -461,6 +461,13 @@ class DLLMConfig:
     prefill_min_waiting: int = 0
     prefill_max_wait_s: float = 0.5
     decode_micro_batch: int = 0
+    force_first: bool = False
+    stable_unmask: bool = False
+    stable_min_conf: float = 0.0
+    stable_ctx: int = 0
+    force_first_min_conf: float = 0.0
+    entropy_bound: float = 0.0
+    unmask_budget: float = 0.0
 
 
 @dataclass
@@ -507,7 +514,14 @@ class MiscConfig:
                                  eos_early_stop=engine_config.dllm_eos_early_stop,
                                  prefill_min_waiting=engine_config.dllm_prefill_min_waiting,
                                  prefill_max_wait_s=engine_config.dllm_prefill_max_wait_s,
-                                 decode_micro_batch=engine_config.dllm_decode_micro_batch)
+                                 decode_micro_batch=engine_config.dllm_decode_micro_batch,
+                                 force_first=engine_config.dllm_force_first,
+                                 stable_unmask=engine_config.dllm_stable_unmask,
+                                 stable_min_conf=engine_config.dllm_stable_min_conf,
+                                 stable_ctx=engine_config.dllm_stable_ctx,
+                                 force_first_min_conf=engine_config.dllm_force_first_min_conf,
+                                 entropy_bound=engine_config.dllm_entropy_bound,
+                                 unmask_budget=engine_config.dllm_unmask_budget)
         misc_config = cls(
             custom_module_map=engine_config.custom_module_map,
             empty_init=engine_config.empty_init,

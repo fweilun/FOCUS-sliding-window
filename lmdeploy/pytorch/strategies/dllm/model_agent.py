@@ -27,6 +27,8 @@ class DLLMExtraInputs(ExtraInputs):
     dllm_mask: torch.Tensor
     # confidence of each masked, processed position at the last unmasking step (host-side window placement)
     dllm_conf: Optional[torch.Tensor] = None
+    # stable_unmask: per position, the prediction of the last step that processed it while masked (-1 = none)
+    dllm_prev_pred: Optional[torch.Tensor] = None
 
     def broadcast(self, src: int, group, async_op=False):
         return dist.broadcast(self.dllm_mask, src=src, group=group, async_op=async_op)
@@ -155,6 +157,9 @@ class DLLMModelAgentStrategy(ModelAgentStrategy):
         self.unmasking_processor = UnmaskingProcessor(dllm_config=dllm_config)
         self._return_conf = (dllm_config.window_conf > 0 or dllm_config.window_topn > 0
                              or dllm_config.cache_delay == 'conf')
+        self._stable_unmask = bool(dllm_config.stable_unmask)
+        # the context filter is evaluated on the host, so later loops of a multi-step forward cannot apply it
+        self._carry_prev_pred = self._stable_unmask and not dllm_config.stable_ctx
         self._logits_buffer: torch.Tensor | None = None
         self._logits_buffer_capacity: int = 0
         self._logits_vocab_size: int = 0
@@ -302,7 +307,7 @@ class DLLMModelAgentStrategy(ModelAgentStrategy):
         dllm_mask[is_cached] = consts.DLLM_MASKED
         seqlens = torch.where(is_cached.view(-1), seqlens, seqlens.new_zeros((1, )))
 
-        return next_token_ids.flatten(), dllm_mask.flatten(), seqlens
+        return next_token_ids.flatten(), dllm_mask.flatten(), seqlens, is_cached
 
     def slice_outputs(self, inputs: torch.Tensor, seq_length: torch.LongTensor) -> torch.Tensor:
         """Slice outputs."""
@@ -323,7 +328,10 @@ class DLLMModelAgentStrategy(ModelAgentStrategy):
                            model_outputs: Dict[str, torch.Tensor], **kwargs) -> DLLMExtraInputs:
         """Slice outputs."""
         dllm_mask = self.slice_outputs(extra_inputs.dllm_mask, model_inputs.seq_length)
-        return DLLMExtraInputs(dllm_mask=dllm_mask)
+        prev_pred = extra_inputs.dllm_prev_pred
+        if prev_pred is not None:
+            prev_pred = self.slice_outputs(prev_pred, model_inputs.seq_length)
+        return DLLMExtraInputs(dllm_mask=dllm_mask, dllm_prev_pred=prev_pred)
 
     def _step_sampling_inputs(self, sampling_inputs: SamplingInputs, next_token_ids: torch.Tensor,
                               dllm_mask: torch.Tensor, **kwargs):
@@ -360,8 +368,19 @@ class DLLMModelAgentStrategy(ModelAgentStrategy):
     def make_extra_inputs(self, seqs: 'SeqList') -> ExtraInputs:
         """Create extra inputs."""
         dllm_masks = [seq.dllm_mask for seq in seqs]
+        prev_pred = None
+        if self._stable_unmask:
+            # same per-sequence length as the mask (a prefill carries more than one block); only the last block,
+            # the one being decoded, has predictions
+            preds = []
+            for seq, mask in zip(seqs, dllm_masks):
+                pred = np.full((len(mask), ), -1, dtype=np.int64)
+                num = min(len(mask), self.block_size)
+                pred[-num:] = seq.stable_prev_pred()[-num:]
+                preds.append(pred)
+            prev_pred = torch.as_tensor(np.concatenate(preds))
         dllm_masks = torch.as_tensor(np.concatenate(dllm_masks))
-        return DLLMExtraInputs(dllm_mask=dllm_masks)
+        return DLLMExtraInputs(dllm_mask=dllm_masks, dllm_prev_pred=prev_pred)
 
     def make_extra_outputs(self, extra_inputs: DLLMExtraInputs, **kwargs) -> DLLMExtraOutputs:
         """Create extra outputs."""
@@ -379,11 +398,16 @@ class DLLMModelAgentStrategy(ModelAgentStrategy):
         model_inputs.model_metas = model_metas
         dllm_mask = extra_inputs.dllm_mask
 
-        next_token_ids, dllm_mask, step_seqlens = self._update_dllm(next_token_ids, dllm_mask, model_inputs.seq_length)
+        next_token_ids, dllm_mask, step_seqlens, is_cached = self._update_dllm(next_token_ids, dllm_mask,
+                                                                               model_inputs.seq_length)
         model_inputs.step(next_token_ids, step_seqlens)
         self._step_sampling_inputs(sampling_inputs, next_token_ids, dllm_mask=dllm_mask)
 
-        extra_inputs = DLLMExtraInputs(dllm_mask=dllm_mask)
+        prev_pred = extra_inputs.dllm_prev_pred
+        if prev_pred is not None:
+            # a retired block is replaced by a fresh one without predictions
+            prev_pred = prev_pred.view(-1, self.block_size).masked_fill(is_cached[:, None], -1).flatten()
+        extra_inputs = DLLMExtraInputs(dllm_mask=dllm_mask, dllm_prev_pred=prev_pred)
         return model_inputs, extra_inputs
 
     def post_sampling(self, inputs: 'ModelInputs', logits: torch.Tensor, next_token_ids: torch.LongTensor,
@@ -393,10 +417,20 @@ class DLLMModelAgentStrategy(ModelAgentStrategy):
         input_ids = inputs.input_ids
         input_ids = self.slice_outputs(input_ids.flatten(), inputs.seq_length)
 
+        prev_pred = extra_inputs.dllm_prev_pred
         cached_masks = self._temporarily_cache_unprocessed(dllm_mask, inputs)
-        dllm_mask, next_token_ids, conf = self.unmasking_processor(logits, input_ids, next_token_ids, dllm_mask)
+        dllm_mask, next_token_ids, conf = self.unmasking_processor(logits, input_ids, next_token_ids, dllm_mask,
+                                                                   prev_pred)
         self._restore_cached_unprocessed(dllm_mask, cached_masks)
 
+        if prev_pred is not None and not self._carry_prev_pred:
+            extra_inputs.dllm_prev_pred = None
+        elif prev_pred is not None:
+            # for the next loop of a multi-step forward; the host derives the same from the output token ids
+            still_masked = dllm_mask == consts.DLLM_MASKED
+            if cached_masks is not None:
+                still_masked &= ~cached_masks.flatten()
+            extra_inputs.dllm_prev_pred = torch.where(still_masked, next_token_ids, prev_pred)
         extra_inputs.dllm_mask = dllm_mask
         extra_inputs.dllm_conf = conf
         return next_token_ids, extra_inputs

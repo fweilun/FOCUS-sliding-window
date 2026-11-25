@@ -407,6 +407,22 @@ class PytorchEngineConfig:
             overlaps the other micro-batch's forward. The forward then no longer synchronises on its per-step
             stats; they are read after the output event instead. 0 keeps one batch per step. Do not combine with
             dllm_masked_logits: its row selection (nonzero) blocks the host until the forward is done.
+        dllm_force_first (bool): low_confidence_dynamic also decodes the leftmost processed masked position of
+            every block each step, on top of the threshold / top-1 rule.
+        dllm_stable_unmask (bool): low_confidence_dynamic also decodes a processed masked position whose argmax
+            equals the one from the last step that processed it (two consecutive predictions agree).
+        dllm_stable_min_conf (float): with dllm_stable_unmask, the agreeing prediction also needs at least this
+            confidence. 0 = no floor.
+        dllm_stable_ctx (int): with dllm_stable_unmask, the two predictions only count when a position within this
+            distance was decoded between them (the context changed, the prediction did not). 0 = off.
+        dllm_force_first_min_conf (float): with dllm_force_first, the leftmost mask is only forced when its
+            confidence reaches this floor. 0 = always.
+        dllm_entropy_bound (float): > 0 replaces the confidence threshold of low_confidence_dynamic by the
+            entropy-bounded rule (EB-Sampler, as in DiffusionGemma): decode the lowest-entropy masks of a block
+            while sum(entropy) - max(entropy) <= this bound (at least one per step).
+        dllm_unmask_budget (float): > 0 (and no dllm_entropy_bound) replaces the confidence threshold by an error
+            budget: decode the most confident masks of a block while their summed error, sum(1 - confidence), stays
+            within this budget (at least one per step). Uses the confidence already computed, so no host sync.
     """
     dtype: str = 'auto'
     tp: int = 1
@@ -478,6 +494,13 @@ class PytorchEngineConfig:
     dllm_prefill_min_waiting: int = 0
     dllm_prefill_max_wait_s: float = 0.5
     dllm_decode_micro_batch: int = 0
+    dllm_force_first: bool = False
+    dllm_stable_unmask: bool = False
+    dllm_stable_min_conf: float = 0.0
+    dllm_stable_ctx: int = 0
+    dllm_force_first_min_conf: float = 0.0
+    dllm_entropy_bound: float = 0.0
+    dllm_unmask_budget: float = 0.0
 
     role: EngineRole = EngineRole.Hybrid
     migration_backend: MigrationBackend = MigrationBackend.DLSlime
