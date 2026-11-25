@@ -17,8 +17,10 @@
 |---|---|---|
 | FOCUS token eviction（原 repo 既有） | — | `--focus` |
 | delayed cache 上的 sliding window | `35121389` | `--window-k 4`，搭配 `--delayed-cache` 或 `--focus` |
+| infra：host 簿記批次化、融合的 unmask kernel、LM head 只算 mask | `72c8279f` | `--fast-host --fast-unmask --masked-logits` |
+| infra：FOCUS 的 CUDA graph | `4d903939` | 拿掉 `--eager` |
 | FOCUS 保留量與觸發門檻選項、step profiling | `72c8279f` | `--focus-min-keep 4 --focus-evict-gate 1`；環境變數 `DLLM_STEP_PROFILE=out.json` |
-| prefill 合併、decode micro-batch | `ec04648c` | `--prefill-min-waiting 16`、`--decode-micro-batch 64` |
+| infra：prefill 合併、decode micro-batch | `ec04648c` | `--prefill-min-waiting 16`、`--decode-micro-batch 64` |
 | unmask 規則：每步強制解最左邊的 mask（force-first） | `e7aea791` | `--force-first`，可加門檻 `--force-first-min-conf 0.5` |
 | unmask 規則：連續兩次預測相同就解（stable） | `e7aea791` | `--stable-unmask`，可加 `--stable-min-conf 0.5`、`--stable-ctx N` |
 | unmask 規則：entropy bound（EB sampler） | `e7aea791` | `--entropy-bound 0.5` |
@@ -51,6 +53,7 @@ hf download openai/gsm8k main/test-00000-of-00001.parquet --repo-type dataset --
 
 | 結果 | tag | 指令 |
 |---|---|---|
+| infra 優化累加 ablation 與 nsys 時間拆解（見 [results/gsm_opt/README.md](results/gsm_opt/README.md)） | `ec04648c` 或之後 | `OUT=results/repro/gsm_opt bash results/gsm_opt/run_opt.sh` |
 | SDAR：8 種模式 × bs 1/8/32/128（第 3 節） | `results-v1` | `OUT=results/repro/sdar bash results/multimodel/sdar_sweep.sh` |
 | I-DLM：ISD 設定 × bs 1/8/32/64（第 4 節） | `results-v1` | `OUT=$PWD/results/repro/idlm bash results/multimodel/idlm_sweep.sh` |
 | DiffusionGemma：模式 × bs 1/4/8（第 5 節） | `results-v1` | `OUT=results/repro/dg bash results/multimodel/dg_sweep.sh` |
