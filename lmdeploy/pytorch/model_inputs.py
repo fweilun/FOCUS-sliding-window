@@ -573,7 +573,8 @@ class StepContext:
         dllm_defer_host = False
         if dllm_cfg is not None:
             dllm_track = dllm_cfg.track
-            dllm_defer_host = int(getattr(dllm_cfg, 'decode_micro_batch', 0) or 0) > 0
+            dllm_defer_host = (int(getattr(dllm_cfg, 'decode_micro_batch', 0) or 0) > 0
+                               or int(getattr(dllm_cfg, 'gpu_multistep', 0) or 0) > 0)
 
         ret = StepContext(
             input_ids=input_ids_tensor,

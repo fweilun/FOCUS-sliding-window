@@ -468,6 +468,7 @@ class DLLMConfig:
     force_first_min_conf: float = 0.0
     entropy_bound: float = 0.0
     unmask_budget: float = 0.0
+    gpu_multistep: int = 0
 
 
 @dataclass
@@ -521,7 +522,8 @@ class MiscConfig:
                                  stable_ctx=engine_config.dllm_stable_ctx,
                                  force_first_min_conf=engine_config.dllm_force_first_min_conf,
                                  entropy_bound=engine_config.dllm_entropy_bound,
-                                 unmask_budget=engine_config.dllm_unmask_budget)
+                                 unmask_budget=engine_config.dllm_unmask_budget,
+                                 gpu_multistep=engine_config.dllm_gpu_multistep)
         misc_config = cls(
             custom_module_map=engine_config.custom_module_map,
             empty_init=engine_config.empty_init,

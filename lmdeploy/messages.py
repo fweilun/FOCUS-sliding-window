@@ -423,6 +423,9 @@ class PytorchEngineConfig:
         dllm_unmask_budget (float): > 0 (and no dllm_entropy_bound) replaces the confidence threshold by an error
             budget: decode the most confident masks of a block while their summed error, sum(1 - confidence), stays
             within this budget (at least one per step). Uses the confidence already computed, so no host sync.
+        dllm_gpu_multistep (int): > 0 runs this many delayed-cache decode steps per host round trip (at most 4): the
+            next step's processed positions are computed on the GPU and the host bookkeeping of a step overlaps the
+            following step's forward. Covers delayed cache + sliding window ('neighbor' delay), not FOCUS eviction.
     """
     dtype: str = 'auto'
     tp: int = 1
@@ -501,6 +504,7 @@ class PytorchEngineConfig:
     dllm_force_first_min_conf: float = 0.0
     dllm_entropy_bound: float = 0.0
     dllm_unmask_budget: float = 0.0
+    dllm_gpu_multistep: int = 0
 
     role: EngineRole = EngineRole.Hybrid
     migration_backend: MigrationBackend = MigrationBackend.DLSlime

@@ -77,6 +77,8 @@ def add_engine_args(ap):
     ap.add_argument('--unmask-budget', type=float, default=0.0,
                     help='> 0: decode the most confident masks while sum(1 - conf) fits this budget, instead of the '
                     'confidence threshold (see dllm_unmask_budget)')
+    ap.add_argument('--gpu-multistep', type=int, default=0,
+                    help='> 0: delayed-cache decode steps per host round trip, next inputs built on the GPU')
     ap.add_argument('--eager', action='store_true')
     ap.add_argument('--legacy-sampling', action='store_true',
                     help='top-k 50 / temperature 0.8 sampling, as in the runs before greedy decoding was fixed')
@@ -126,6 +128,7 @@ def build_engine(args):
         dllm_force_first_min_conf=args.force_first_min_conf,
         dllm_entropy_bound=args.entropy_bound,
         dllm_unmask_budget=args.unmask_budget,
+        dllm_gpu_multistep=args.gpu_multistep,
         # 4096 at the default concurrency 128; small batches keep it so prompts are not split into 32-token chunks
         max_prefill_token_num=max(args.concurrency * BLOCK, 4096),
     )

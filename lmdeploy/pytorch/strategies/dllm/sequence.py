@@ -637,6 +637,10 @@ class DLLMSequenceStrategy(SequenceStrategy):
                         input_tokens = model_meta.get(consts.DLLM_META_INPUT_TOKENS)
                     msg.record_decode_stats(processed_tokens, input_tokens)
                 if self.enable_delayed_cache:
+                    if msg._delayed_cache_state.needs_warmup and getattr(self.dllm_config, 'gpu_multistep', 0):
+                        # gpu_multistep: a block retired inside the round and the GPU already ran its warmup step,
+                        # which is this output (a round-start step consumed the flag in get_processing_indices)
+                        msg._delayed_cache_state.needs_warmup = False
                     # Refresh delayed-cache bookkeeping using the existing mask
                     # so newly unmasked tokens still get one more iteration.
                     msg._update_delayed_cache_state()

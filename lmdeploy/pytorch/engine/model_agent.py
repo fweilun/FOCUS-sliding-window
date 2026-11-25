@@ -801,6 +801,8 @@ class BaseModelAgent:
                 next_token_ids=next_token_ids,
                 model_metas=model_metas,
                 extra_inputs=extra_inputs,
+                model_config=self.model_config,
+                cache_block_size=self.cache_config.block_size,
             )
 
         # dist tools
